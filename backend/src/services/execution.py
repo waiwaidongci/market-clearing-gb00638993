@@ -8,6 +8,7 @@ from src.domain.spec import SPEC
 from src.models.jobs import Delivery, Run, Schedule
 from src.models.source import Dataset
 from src.services.audit import record
+from src.services.quarantine import history
 from src.utils.exports import write_report
 from src.utils.time import now
 
@@ -58,14 +59,19 @@ def claim():
         job.attempt += 1
         job.lease_until = stamp + timedelta(minutes=3)
         records = db.get(Dataset, job.dataset_id).rows
-        return job.id, job.attempt, records, job.params
+        # Read the release ledger in this same transaction as the dataset so the
+        # analysis sees each quarantined group wholly before or wholly after
+        # release; a concurrent release commits both its held-row retirement and
+        # its released row atomically.
+        ledger = history(db)
+        return job.id, job.attempt, records, job.params, ledger
 
 
 def execute(lease):
-    job_id, attempt, rows, params = lease
+    job_id, attempt, rows, params, ledger = lease
     result = export = failure = None
     try:
-        result = analyze(rows, params)
+        result = analyze(rows, params, ledger)
         export = write_report(job_id, attempt, result)
     except ValueError as error:
         failure = str(error)[:500]

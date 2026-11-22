@@ -24,6 +24,12 @@ class ReviewRequest(Request):
     note: str = Field(min_length=1, max_length=500)
     decision: str = Field(default='', max_length=120)
 
+class ReleaseRequest(Request):
+    dataset_id: int = Field(gt=0)
+    group_id: str = Field(min_length=1, max_length=16)
+    destination: str = Field(min_length=1, max_length=200)
+    note: str = Field(default='', max_length=500)
+
 class ScheduleRequest(RunRequest):
     recipient: str = Field(min_length=1, max_length=100)
     first_at: datetime

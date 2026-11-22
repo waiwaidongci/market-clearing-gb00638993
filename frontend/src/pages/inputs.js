@@ -1,5 +1,6 @@
 import {feedback, field} from '../components/common/fields.js';
-import {empty, panel} from '../components/common/panels.js';
+import {empty, panel, pill} from '../components/common/panels.js';
+import {HOLD} from '../constants/enums.js';
 import {table} from '../components/common/table.js';
 import {handler} from '../hooks/action.js';
 import {session} from '../stores/session.js';
@@ -14,13 +15,21 @@ export async function inputs(route, refresh) {
   const sample = button('下载示例 CSV', {class:'quiet',onClick:event=>handler(sample,error,()=>workspace.download('/template',spec.sample_name))(event)});
   const detail = selected && await workspace.getDataset(selected.id,route.offset);
   const columns = spec.fields.map(field => ({key:field.key,label:field.label}));
+  const holds = detail?.holds || [];
+  detail?.rows.forEach((row,index) => Object.assign(row, holds[index] || {}));
+  const holdColumns = [
+    {label:'扣留状态',render:row=>pill(HOLD[row.hold_state] || row.hold_state || '正常',
+      row.hold_state === '扣留' ? 'held' : row.hold_state === '待放行' ? 'pending' : 'normal')},
+    {key:'hold_reason',label:'扣留原因'},
+    {key:'release_destination',label:'放行去向'},
+  ];
   const preview = detail ? panel('批次明细', el('div',{class:'actions'},
     el('label',{for:'dataset-id',class:'sr'}, '选择数据批次'),
     el('select',{id:'dataset-id','aria-label':'选择数据批次',onChange:event=>{location.hash=`#inputs/${event.target.value}`;}},
       datasets.map(item=>el('option',{value:item.id,selected:item.id === selected.id}, item.name))),
     link('使用此批次运行',`#run/${detail.id}`,{class:'quiet'})),
     p(`${detail.filename} · ${detail.row_count} 行 · ${date(detail.created_at)}`,'filename'),
-    table(columns,detail.rows,{caption:'批次明细',pageSize:16}),
+    table([...columns,...holdColumns],detail.rows,{caption:'批次明细',pageSize:16}),
     el('div',{class:'pagination'},
       route.offset > 0 && link('上一批明细',`#inputs/${detail.id}/${Math.max(0,route.offset-16)}`,{class:'quiet'}),
       p(`${detail.rows.length ? route.offset+1 : route.offset}–${route.offset+detail.rows.length} / ${detail.row_count}`),

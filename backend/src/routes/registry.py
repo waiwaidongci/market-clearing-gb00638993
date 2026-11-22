@@ -5,10 +5,12 @@ from sqlalchemy.orm import Session
 from src.config.database import connection
 from src.constants.enums import Role
 from src.controllers.auth import allow, current
+from src.domain.analysis import annotate, assess_rows
 from src.domain.spec import SPEC
 from src.models.identity import User
 from src.models.source import Dataset
 from src.schemas.requests import Upload
+from src.services import quarantine
 from src.services.audit import record
 from src.services.datasets import save, template
 from src.services.validation import parse_rows
@@ -40,7 +42,10 @@ def details(dataset_id: int, offset: int = Query(0, ge=0), limit: int = Query(16
     item = db.get(Dataset, dataset_id)
     if not item:
         raise HTTPException(404, '找不到该数据批次')
-    return {**views.dataset(item), 'rows': item.rows[offset:offset + limit]}
+    rows = item.rows[offset:offset + limit]
+    assessment = assess_rows(item.rows, quarantine.history(db))
+    holds = annotate(assessment, rows)
+    return {**views.dataset(item), 'rows': rows, 'holds': holds}
 
 
 @router.post('/datasets', status_code=201)
@@ -49,6 +54,10 @@ def upload(body: Upload, db: Session = Depends(connection),
     rows = parse_rows(body.csv_text)
     item, created = save(db, body.name, body.filename, rows, actor.username)
     if created:
-        record(db, actor.username, 'dataset.imported', item.id, rows=item.row_count)
+        assessment = assess_rows(rows, quarantine.history(db))
+        quarantine.capture(db, item.id, assessment, actor.username)
+        held = [group for group in assessment["groups"] if group["status"] == quarantine.HELD]
+        record(db, actor.username, 'dataset.imported', item.id, rows=item.row_count,
+               held=len(held))
     db.commit()
     return {**views.dataset(item), 'created': created}
